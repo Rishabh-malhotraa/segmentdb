@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import ClassVar
 import struct
 
 
@@ -15,6 +16,8 @@ class WALHeader:
     └─────────────┴──────┴───────────┴──────────┘
     Byte order: All integers use big-endian encoding (most significant byte first).
     """
+
+    HEADER_SIZE: ClassVar[int] = 32
 
     magic: bytes = b"WALX"
     version: int = 1
@@ -37,3 +40,8 @@ class WALHeader:
             raise ValueError(f"Invalid WAL version: {version}")
 
         return cls(magic, version, timestamp)
+
+    @classmethod
+    def validate(cls, data: bytes) -> None:
+        """Validate header bytes without returning an object."""
+        cls.from_bytes(data)
