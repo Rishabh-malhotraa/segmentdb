@@ -10,7 +10,7 @@ class OperationType(Enum):
     DELETE = 2
 
 
-@dataclass
+@dataclass(slots=True)
 class WALEntry:
     """
     WAL entry representing a single operation (PUT or DELETE).

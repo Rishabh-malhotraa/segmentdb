@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import struct
 
 
-@dataclass
+@dataclass(slots=True)
 class WALHeader:
     """
     WAL file header (32 bytes total).
