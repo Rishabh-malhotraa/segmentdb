@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "segmentdb"
+version = "0.1.0"
+description = "A segment-based database with Write-Ahead Logging"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{include = "segmentdb", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+black = "^23.0"
+ruff = "^0.1.0"
+mypy = "^1.0"
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
