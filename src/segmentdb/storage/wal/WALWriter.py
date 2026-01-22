@@ -1,40 +1,51 @@
-from itertools import count
-from queue import Queue
+from queue import Queue, Empty
+from threading import Thread
 from typing import BinaryIO
+import os
 
-from segmentdb.storage.wal import OperationType, WALEntry
+from segmentdb.storage.wal import WALEntry
 
 
 class WALWriter:
     """Writes entries to a Write-Ahead Log with buffered queue."""
 
-    def __init__(self, fd: BinaryIO, start_seq: int = 1) -> None:
+    def __init__(self, fd: BinaryIO) -> None:
         self._fd = fd
-        self._queue: Queue[bytes] = Queue()
-        self._seq_counter = count(start_seq)
+        self._queue: Queue[bytes | None] = Queue()
+        self._thread = Thread(target=self._background_writer, daemon=True)
+        self._thread.start()
 
-    def put(self, key: str, value: str) -> None:
-        """Queue a PUT operation for the given key-value pair."""
-        entry = WALEntry(
-            seq_no=next(self._seq_counter),
-            op_type=OperationType.PUT,
-            key=key.encode("utf-8"),
-            value=value.encode("utf-8"),
-        )
+    def append(self, entry: WALEntry) -> None:
+        """Queue a WAL entry to be written."""
         self._queue.put(entry.to_bytes())
 
-    def delete(self, key: str) -> None:
-        """Queue a DELETE operation for the given key."""
-        entry = WALEntry(
-            seq_no=next(self._seq_counter),
-            op_type=OperationType.DELETE,
-            key=key.encode("utf-8"),
-            value=None,
-        )
-        self._queue.put(entry.to_bytes())
+    def close(self) -> None:
+        """Signal shutdown and wait for background writer to finish."""
+        self._queue.put(None)
+        self._thread.join()
 
-    def flush(self) -> None:
-        """Flush all pending writes to WAL file."""
-        while not self._queue.empty():
-            self._fd.write(self._queue.get_nowait())
-        self._fd.flush()
+    def _background_writer(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+
+            batch: list[bytes] = [item]
+            while len(batch) < 256:
+                try:
+                    item = self._queue.get_nowait()
+                    if item is None:
+                        self._write_batch(batch)
+                        return
+                    batch.append(item)
+                except Empty:
+                    break
+
+            self._write_batch(batch)
+
+    def _write_batch(self, batch: list[bytes]) -> None:
+        """Write a batch of entries to disk and sync."""
+        if batch:
+            self._fd.write(b"".join(batch))
+            self._fd.flush()
+            os.fsync(self._fd.fileno())
