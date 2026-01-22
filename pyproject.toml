@@ -2,13 +2,14 @@
 name = "segmentdb"
 version = "0.1.0"
 description = "A segment-based database with Write-Ahead Logging"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Rishabh Malhotra <rishabhmalhotraa01@gmail.com>"]
 readme = "README.md"
 license = "MIT"
 packages = [{include = "segmentdb", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.8"
+sortedcontainers = "^2.4.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"

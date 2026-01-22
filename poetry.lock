@@ -286,6 +286,18 @@ files = [
 ]
 
 [[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+description = "Sorted Containers -- Sorted List, Sorted Dict, Sorted Set"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0"},
+    {file = "sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88"},
+]
+
+[[package]]
 name = "tomli"
 version = "2.4.0"
 description = "A lil' TOML parser"
@@ -358,4 +370,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.8"
-content-hash = "ce8590c98bd256dace0950491a90e4e700057925b5e5c4e40eb71774cad45c89"
+content-hash = "e39ffccababf543ed2cf77d8a47fd14dc83f9997cecdbadaed811b37dbadf316"
