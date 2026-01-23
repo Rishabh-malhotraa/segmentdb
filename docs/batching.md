@@ -1,75 +1,10 @@
-# WAL Batching Strategy
+# WAL Batching Design Document
+
+*Last Updated: January 23, 2026*
 
 This document explains the batching approach used in `WALWriter` and the rationale for choosing entry-count batching over alternatives.
 
-## Problem
-
-Each `fsync()` call is expensive (~5-10ms on HDD, ~0.5-2ms on SSD). Writing entries one-by-one would severely limit throughput. Batching amortizes the `fsync()` cost across multiple entries.
-
-## Options Considered
-
-### 1. Time-Based Batching
-
-Flush all records that arrive within a fixed time window (e.g., 2ms).
-
-```python
-deadline = time.perf_counter() + 0.002  # 2ms window
-while time.perf_counter() < deadline:
-    try:
-        batch.append(q.get_nowait())
-    except queue.Empty:
-        break
-```
-
-| Pros | Cons |
-|------|------|
-| Bounded latency | Clock-dependent behavior |
-| Good for bursty workloads | Adds timing complexity |
-| | May flush tiny batches under low load |
-
-### 2. Size-Based Batching
-
-Flush when total payload reaches a limit (e.g., 64KB).
-
-```python
-MAX_BATCH_BYTES = 64 * 1024
-total_bytes = 0
-while total_bytes < MAX_BATCH_BYTES:
-    item = q.get_nowait()
-    total_bytes += len(item)
-    batch.append(item)
-```
-
-| Pros | Cons |
-|------|------|
-| Optimal disk I/O alignment | Unpredictable entry count per batch |
-| Good for large values | Requires tracking cumulative size |
-| | Large entries can trigger frequent flushes |
-
-### 3. Entry-Count Batching (Chosen)
-
-Flush when batch reaches N entries (e.g., 256) or queue is empty.
-
-```python
-while len(batch) < 256:
-    try:
-        batch.append(q.get_nowait())
-    except queue.Empty:
-        break
-```
-
-| Pros | Cons |
-|------|------|
-| Simple to implement | Not optimal for variable-size entries |
-| Predictable memory usage | |
-| No clock dependencies | |
-| Clear upper bound on work per flush | |
-
-## Decision
-
-I chose entry-count batching because it is the easiest to reason about and provides a clear upper bound on work per flush. The behavior is predictable and does not depend on clocks or timing. The flush thread processes at most N records per batch, which avoids large variance in batch size and keeps both latency and memory usage bounded.
-
-## Implementation
+## Final Design
 
 ```python
 def _background_writer(self):
@@ -92,7 +27,86 @@ def _background_writer(self):
         self._write_batch(batch)
 ```
 
-The batch limit of 256 entries provides a balance between:
-- **Throughput** — Enough entries to amortize `fsync()` cost
-- **Latency** — Not waiting too long to accumulate a full batch
-- **Memory** — Bounded allocation per flush cycle
+**Key parameters:**
+- `BATCH_SIZE = 256` entries per flush
+- Blocks on first item, then drains queue non-blocking
+- Sentinel (`None`) triggers graceful shutdown
+
+---
+
+## Design Iterations
+
+### Iteration 1: Batching Strategy — Time vs Size vs Count
+
+**Problem:** Each `fsync()` call is expensive (~5-10ms on HDD, ~0.5-2ms on SSD). Writing entries one-by-one would severely limit throughput.
+
+**Options considered:**
+
+| Strategy | Pros | Cons |
+|----------|------|------|
+| Time-based (flush every 2ms) | Bounded latency, good for bursts | Clock-dependent, may flush tiny batches |
+| Size-based (flush at 64KB) | Optimal disk alignment | Unpredictable entry count, size tracking overhead |
+| Entry-count (flush at N entries) | Simple, predictable memory, no clock deps | Not optimal for variable-size entries |
+
+**Final:** Entry-count batching (256 entries)
+
+**Rationale:**
+- Simplest to reason about and implement
+- Predictable memory usage — bounded allocation per flush
+- No clock dependencies — deterministic behavior
+- Clear upper bound on work per flush cycle
+
+---
+
+### Iteration 2: Shutdown Handling — Drain Before Exit
+
+**Problem:** What happens to queued entries when `close()` is called?
+
+**Original concern:** Entries in the queue could be lost on shutdown.
+
+**Final:** Sentinel-based shutdown with drain
+
+```python
+# In close():
+self._queue.put(None)  # Sentinel
+
+# In worker:
+if item is None:
+    self._write_batch(batch)  # Flush remaining before exit
+    return
+```
+
+**Rationale:**
+- Sentinel goes into queue, so all entries before it get processed
+- Final batch is flushed before worker exits
+- No data loss on graceful shutdown
+
+---
+
+## Why 256 Entries?
+
+The batch limit of 256 provides a balance between:
+
+| Concern | Tradeoff |
+|---------|----------|
+| **Throughput** | Enough entries to amortize `fsync()` cost |
+| **Latency** | Not waiting too long to accumulate a full batch |
+| **Memory** | Bounded allocation per flush cycle |
+
+At typical entry sizes (~100-500 bytes), this results in ~25-125KB per batch — a reasonable I/O size.
+
+---
+
+## Usage
+
+```python
+writer = WALWriter("/path/to/wal")
+
+# Writes are batched automatically
+writer.append(entry1)
+writer.append(entry2)
+writer.append(entry3)
+
+# Graceful shutdown - flushes remaining entries
+writer.close()
+```
