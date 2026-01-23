@@ -1,18 +1,22 @@
 from collections import deque
 from dataclasses import dataclass
-from threading import Condition, Lock, Thread, Event
+from threading import Condition, Lock, Thread
 
 from sortedcontainers import SortedDict
+
+
+@dataclass(slots=True, frozen=True)
+class FlushTask:
+    """A store to flush along with its checkpoint sequence number."""
+
+    store: SortedDict
+    checkpoint_seq_no: int
 
 
 @dataclass(slots=True, frozen=True)
 class MemtableEntry:
     seq_no: int
     value: bytes | None = None
-
-    @property
-    def is_tombstone(self) -> bool:
-        return self.value is None
 
     @property
     def size_bytes(self) -> int:
@@ -30,8 +34,9 @@ class Memtable:
 
     Thread Safety:
         - All public methods are thread-safe
-        - Writes are protected by _lock
-        - Background flushing is coordinated via _flush_signal
+        - Uses a single Condition (_flush_signal) to protect shared state
+        - Lock is held briefly for pointer operations; actual I/O happens unlocked
+        - Background flushing is coordinated via _flush_signal.wait_for()
 
     Example:
         memtable = Memtable()
@@ -48,11 +53,9 @@ class Memtable:
     def __init__(self):
         self._store = SortedDict()
         self._size_bytes = 0
-        self._immutable_stores: deque[SortedDict] = deque()
+        self._immutable_stores: deque[FlushTask | None] = deque()
 
-        self._lock = Lock()
         self._flush_signal = Condition()
-        self._shutdown_event = Event()
 
         self._thread = Thread(target=self._flush_worker, daemon=True)
         self._thread.start()
@@ -64,28 +67,30 @@ class Memtable:
     def put(self, key: bytes, entry: MemtableEntry) -> None:
         self._set(key, entry)
 
-    def get(self, key: bytes) -> MemtableEntry | None:
-        with self._lock:
-            if key in self._store:
-                return self._store[key]
-
-            for store in reversed(self._immutable_stores):
-                if key in store:
-                    return store[key]
-
-            return None
-
     def delete(self, key: bytes, tombstone: MemtableEntry) -> None:
         self._set(key, tombstone)
 
+    def get(self, key: bytes) -> MemtableEntry | None:
+        with self._flush_signal:
+            if key in self._store:
+                return self._store[key]
+
+            for task in reversed(self._immutable_stores):
+                if task is None:
+                    continue
+                if key in task.store:
+                    return task.store[key]
+
+            return None
+
     def close(self):
         with self._flush_signal:
-            self._shutdown_event.set()
+            self._immutable_stores.append(None)
             self._flush_signal.notify()
         self._thread.join()
 
     def _set(self, key: bytes, entry: MemtableEntry) -> None:
-        with self._lock:
+        with self._flush_signal:
             if key in self._store:
                 old_entry = self._store[key]
                 self._size_bytes -= len(key) + old_entry.size_bytes
@@ -93,31 +98,31 @@ class Memtable:
             self._store[key] = entry
             self._size_bytes += len(key) + entry.size_bytes
 
-            with self._flush_signal:
-                if self.should_flush:
-                    self._immutable_stores.append(self._store)
-                    self._store = SortedDict()
-                    self._size_bytes = 0
-                    self._flush_signal.notify()
+            if self.should_flush:
+                # Use the entry's seq_no as the checkpoint
+                # (highest seq_no in this store since it's the last write)
+                task = FlushTask(store=self._store, checkpoint_seq_no=entry.seq_no)
+                self._immutable_stores.append(task)
+                self._store = SortedDict()
+                self._size_bytes = 0
+                self._flush_signal.notify()
 
     def _flush_worker(self):
         """Background thread that flushes immutable stores to disk."""
         while True:
             with self._flush_signal:
-                while not self._immutable_stores and not self._shutdown_event.is_set():
-                    self._flush_signal.wait()
+                self._flush_signal.wait_for(lambda: self._immutable_stores)
+                task = self._immutable_stores.popleft()
 
-                stores_to_flush = self._immutable_stores.copy()
+            if task is None:
+                return
 
-            for store in stores_to_flush:
-                # TODO: Implement Memtable Writer to flush the immutable store
-                # Create a bloom filter
-                # Create a sparse index
+            # Iterate through all entries in sorted order
+            for key, entry in task.store.items():
+                # TODO: Write to SSTable
+                # TODO: Add key to bloom filter
+                # TODO: Update sparse index
                 pass
 
-            with self._flush_signal:
-                for _ in stores_to_flush:
-                    self._immutable_stores.popleft()
-
-            if self._shutdown_event.is_set():
-                return
+            # TODO: After successful flush, checkpoint the WAL at task.checkpoint_seq_no
+            # This allows truncating WAL entries up to this sequence number
