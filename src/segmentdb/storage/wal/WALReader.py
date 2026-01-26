@@ -44,14 +44,14 @@ class WALReader:
             raise ValueError("Truncated entry: incomplete length field")
 
         entry_length = struct.unpack(">I", length_data)[0]
-        payload_with_crc = self._fd.read(entry_length)
+        payload_with_checksum = self._fd.read(entry_length)
 
-        if len(payload_with_crc) < entry_length:
+        if len(payload_with_checksum) < entry_length:
             raise ValueError(
-                f"Truncated entry: expected {entry_length} bytes, got {len(payload_with_crc)}"
+                f"Truncated entry: expected {entry_length} bytes, got {len(payload_with_checksum)}"
             )
 
-        return WALEntry.from_bytes(payload_with_crc)
+        return WALEntry.from_bytes(payload_with_checksum)
 
     def __iter__(self) -> Iterator[WALEntry]:
         """Return self as iterator."""
