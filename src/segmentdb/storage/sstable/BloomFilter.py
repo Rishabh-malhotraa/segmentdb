@@ -3,11 +3,6 @@ from typing import Iterable
 from xxhash import xxh3_64_intdigest
 
 
-def _hash_func(key: bytes) -> int:
-    """Deterministic hash function for bloom filter persistence."""
-    return xxh3_64_intdigest(key)
-
-
 class BloomFilter:
     """
     Probabilistic data structure for membership testing.
@@ -23,7 +18,10 @@ class BloomFilter:
             # Definitely doesn't exist, skip SSTable
     """
 
-    __slots__ = ("_bloom",)
+    @staticmethod
+    def _hash_func(key: bytes) -> int:
+        """Deterministic hash function for bloom filter persistence."""
+        return xxh3_64_intdigest(key)
 
     def __init__(self, bloom: Bloom) -> None:
         self._bloom = bloom
@@ -47,7 +45,7 @@ class BloomFilter:
         keys_list = list(keys)
         num_keys = max(1, len(keys_list))  # Avoid zero-size filter
 
-        bloom = Bloom(num_keys, false_positive_rate, hash_func=_hash_func)
+        bloom = Bloom(num_keys, false_positive_rate, hash_func=cls._hash_func)
         for key in keys_list:
             bloom.add(key)
 
@@ -55,7 +53,7 @@ class BloomFilter:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "BloomFilter":
-        bloom = Bloom.load_bytes(data, hash_func=_hash_func)
+        bloom = Bloom.load_bytes(data, hash_func=cls._hash_func)
         return cls(bloom)
 
     def __contains__(self, key: bytes) -> bool:

@@ -1,6 +1,6 @@
 # SSTable File Format
 
-*Last Updated: January 23, 2026*
+*Last Updated: January 26, 2026*
 
 This document describes the on-disk format for SSTable (Sorted String Table) files in SegmentDB.
 
@@ -18,42 +18,42 @@ An SSTable is an immutable, sorted key-value file written when a memtable is flu
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Header (16 bytes)                       │
+│                     Header (17 bytes)                       │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ magic_number     (8 bytes)  "SEGMTSST"                 │ │
-│  │ version          (4 bytes)  uint32, little-endian      │ │
-│  │ entry_count      (4 bytes)  uint32, little-endian      │ │
+│  │ version          (4 bytes)  uint32, big-endian         │ │
+│  │ level            (1 byte)   uint8, compaction level    │ │
+│  │ entry_count      (4 bytes)  uint32, big-endian         │ │
 │  └────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
 │                     Data Blocks (variable)                  │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ Entry 1: key_len | key | val_len | value | seq_no      │ │
-│  │ Entry 2: key_len | key | val_len | value | seq_no      │ │
+│  │ Block 1: compressed_size | uncompressed_size | data |  │ │
+│  │          xxh32 checksum                                │ │
+│  │ Block 2: ...                                           │ │
 │  │ ...                                                    │ │
-│  │ Entry N: key_len | key | val_len | value | seq_no      │ │
+│  │ Block N: ...                                           │ │
 │  └────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
 │                     Sparse Index (variable)                 │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ index_entry_count (4 bytes)                            │ │
-│  │ Entry 1: key_len | key | offset                        │ │
-│  │ Entry 2: key_len | key | offset                        │ │
+│  │ Entry 1: offset | key_len | key                        │ │
+│  │ Entry 2: offset | key_len | key                        │ │
 │  │ ...                                                    │ │
 │  └────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
 │                     Bloom Filter (variable)                 │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ num_hash_funcs   (1 byte)                              │ │
-│  │ bit_array_size   (4 bytes)                             │ │
-│  │ bit_array        (variable)                            │ │
+│  │ rbloom serialized bytes (using xxh3_64 hash)           │ │
 │  └────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
 │                     Footer (32 bytes)                       │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ index_offset     (8 bytes)  uint64, little-endian      │ │
-│  │ index_size       (4 bytes)  uint32, little-endian      │ │
-│  │ bloom_offset     (8 bytes)  uint64, little-endian      │ │
-│  │ bloom_size       (4 bytes)  uint32, little-endian      │ │
+│  │ index_offset     (8 bytes)  uint64, big-endian         │ │
+│  │ index_size       (4 bytes)  uint32, big-endian         │ │
+│  │ bloom_offset     (8 bytes)  uint64, big-endian         │ │
+│  │ bloom_size       (4 bytes)  uint32, big-endian         │ │
 │  │ magic_number     (8 bytes)  "SEGMTSST"                 │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
@@ -61,57 +61,81 @@ An SSTable is an immutable, sorted key-value file written when a memtable is flu
 
 ## Section Details
 
-### Header (16 bytes, fixed)
+### Header (17 bytes, fixed)
+
+All integers are big-endian.
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
 | magic_number | 8 bytes | bytes | `"SEGMTSST"` — identifies file as SSTable |
 | version | 4 bytes | uint32 | Format version (currently 1) |
+| level | 1 byte | uint8 | Compaction level (0-255, enables manifest recovery) |
 | entry_count | 4 bytes | uint32 | Total number of key-value entries |
 
-### Data Entry Format
+### Block Format
 
-Each entry in the data block:
+Entries are grouped into LZ4-compressed blocks with integrity checking:
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
-| key_len | 2 bytes | uint16 | Length of key in bytes |
-| key | variable | bytes | The key |
-| val_len | 4 bytes | uint32 | Length of value (0 = tombstone) |
-| value | variable | bytes | The value (empty if tombstone) |
-| seq_no | 8 bytes | uint64 | Sequence number for MVCC |
+| compressed_size | 4 bytes | uint32 | Size of compressed data |
+| uncompressed_size | 4 bytes | uint32 | Original size before compression |
+| compressed_data | variable | bytes | LZ4 compressed entry data |
+| checksum | 4 bytes | uint32 | xxh32 of header + compressed_data |
 
-**Tombstone encoding:** `val_len = 0` indicates a delete marker.
+**Compression:** LZ4 high-compression mode, level 4.
+
+### Entry Format (within decompressed block)
+
+Each entry in a decompressed block:
+
+| Field | Size | Type | Description |
+|-------|------|------|-------------|
+| length | 4 bytes | uint32 | Total length of entry payload |
+| seq_no | 8 bytes | uint64 | Sequence number for MVCC |
+| key_len | 2 bytes | uint16 | Length of key in bytes |
+| val_len | 4 bytes | uint32 | Length of value in bytes |
+| tombstone | 1 byte | uint8 | 0x00 = value, 0x01 = deleted |
+| key | variable | bytes | The key |
+| value | variable | bytes | The value (empty if tombstone) |
+
+**Tombstone encoding:** `tombstone = 0x01` indicates a delete marker (value is empty).
 
 ### Sparse Index
 
-The sparse index stores every Nth key (e.g., every 16th) to enable fast seeking:
+The sparse index stores the first key of each block to enable fast seeking:
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
-| index_entry_count | 4 bytes | uint32 | Number of index entries |
+| entry_count | 4 bytes | uint32 | Number of index entries |
+
+Each index entry (repeated `entry_count` times):
+
+| Field | Size | Type | Description |
+|-------|------|------|-------------|
+| offset | 8 bytes | uint64 | Byte offset of block in data section |
 | key_len | 2 bytes | uint16 | Length of key |
-| key | variable | bytes | The sampled key |
-| offset | 8 bytes | uint64 | Byte offset in data section |
+| key | variable | bytes | First key in the block |
 
 **Lookup strategy:**
-1. Binary search the sparse index to find the nearest key ≤ target
-2. Seek to that offset in the data section
-3. Linear scan until target key is found (or passed)
+1. Binary search the sparse index to find the largest key ≤ target
+2. Seek to that block's offset in the data section
+3. Decompress block and scan entries until target key is found (or passed)
 
 ### Bloom Filter
 
 Probabilistic filter to quickly reject keys that don't exist:
 
-| Field | Size | Type | Description |
-|-------|------|------|-------------|
-| num_hash_funcs | 1 byte | uint8 | Number of hash functions (k) |
-| bit_array_size | 4 bytes | uint32 | Size of bit array in bytes |
-| bit_array | variable | bytes | The bloom filter bits |
+The bloom filter is serialized using the `rbloom` library format with a custom hash function (`xxh3_64_intdigest`) for deterministic, portable hashing.
 
-**False positive rate:** Configured at ~1% with optimal k for expected entry count.
+**Configuration:**
+- False positive rate: ~1%
+- Hash function: xxh3_64 (deterministic across runs)
+- Serialization: `rbloom.Bloom.dumps()` / `rbloom.Bloom.loads()`
 
 ### Footer (32 bytes, fixed)
+
+All integers are big-endian.
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
@@ -127,21 +151,21 @@ Probabilistic filter to quickly reject keys that don't exist:
 2. **Validate** footer magic number
 3. **Load bloom filter** into memory using `bloom_offset` and `bloom_size`
 4. **Load sparse index** into memory using `index_offset` and `index_size`
-5. **On lookup:**
+5. **Keep file descriptor open** for the lifetime of the reader
+6. **On lookup:**
    - Check bloom filter → if negative, key definitely doesn't exist
-   - If positive, binary search sparse index for nearest offset
-   - Seek to offset, linear scan data entries until found or passed
+   - If positive, binary search sparse index to find candidate block
+   - Seek to block offset, read and decompress block
+   - Scan entries in block until key found (or passed)
 
 ## Write Path
 
-1. **Write header** with entry count
-2. **Write data entries** in sorted order, tracking offsets for index
-3. **Build sparse index** (sample every Nth key with its offset)
-4. **Build bloom filter** (add all keys)
-5. **Write sparse index**, record offset
-6. **Write bloom filter**, record offset
-7. **Write footer** with offsets and sizes
-8. **fsync** to ensure durability
+1. **Partition entries into blocks** — Group sorted entries into ~4KB blocks
+2. **Compress each block** — LZ4 high-compression, add xxh32 checksum
+3. **Build sparse index** — Record first key and offset of each block
+4. **Build bloom filter** — Add all keys with ~1% false positive rate
+5. **Assemble file** — Header + blocks + index + bloom + footer
+6. **Write atomically** — temp file + fsync + rename
 
 ## File Naming
 
@@ -258,8 +282,12 @@ Old versions are cleaned up during **compaction**, which merges SSTables and dro
 
 ```python
 MAGIC_NUMBER = b"SEGMTSST"
-HEADER_SIZE = 16
+HEADER_SIZE = 17  # magic(8) + version(4) + level(1) + entry_count(4)
 FOOTER_SIZE = 32
-SPARSE_INDEX_INTERVAL = 16  # Sample every 16th key
+BLOCK_HEADER_SIZE = 8   # compressed_size(4) + uncompressed_size(4)
+BLOCK_FOOTER_SIZE = 4   # xxh32 checksum
+ENTRY_HEADER_SIZE = 15  # seq_no(8) + key_len(2) + val_len(4) + tombstone(1)
+SPARSE_INDEX_ENTRY_HEADER_SIZE = 10  # offset(8) + key_len(2)
 BLOOM_FALSE_POSITIVE_RATE = 0.01  # 1%
+COMPRESSION_LEVEL = 4   # LZ4 high-compression
 ```
