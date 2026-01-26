@@ -154,6 +154,86 @@ data/sstables/
 └── sst-000003.sst
 ```
 
+## Atomic Writes & Immutability
+
+SSTables are **immutable** — once written, they are never modified. This simplifies concurrency and crash recovery.
+
+### Write Strategy: Temp File + fsync + Rename
+
+```python
+# 1. Write to temporary file
+temp_path = path.with_suffix(".tmp")
+with open(temp_path, "wb") as f:
+    f.write(header + blocks + index + bloom + footer)
+    f.flush()
+    os.fsync(f.fileno())  # Force to disk
+
+# 2. Atomic rename
+temp_path.rename(path)  # All-or-nothing visibility
+```
+
+### Why This Works
+
+| Step | Crash Behavior |
+|------|----------------|
+| During write to `.tmp` | Incomplete temp file, ignored on recovery |
+| After `fsync()`, before `rename()` | Complete temp file, can be cleaned up or recovered |
+| After `rename()` | SSTable fully visible and durable |
+
+### Key Properties
+
+1. **No partial files** — Readers never see incomplete SSTables
+2. **No locks needed** — Old SSTable readable while new one is created
+3. **Crash-safe** — Either the full file exists, or it doesn't
+
+### fsync Semantics
+
+```python
+f.flush()              # Python buffer → OS buffer
+os.fsync(f.fileno())   # OS buffer → disk platters
+```
+
+**Without fsync:** OS may report write complete while data is still in RAM. Power loss = data loss.
+
+**With fsync:** Blocks until data is physically on disk (or battery-backed cache).
+
+### Rename Atomicity
+
+On POSIX systems, `rename()` is atomic:
+- Either the old name points to old file, or new name points to new file
+- Never a state where the file is "half-renamed"
+- Works across directories on same filesystem
+
+```
+Before: sst-000001.tmp exists, sst-000001.sst does not
+After:  sst-000001.sst exists (temp file gone)
+```
+
+### Immutability Benefits
+
+| Benefit | Explanation |
+|---------|-------------|
+| **No corruption** | Can't corrupt what you don't modify |
+| **Lock-free reads** | Readers access immutable data, no synchronization |
+| **Simple recovery** | Just delete incomplete `.tmp` files on startup |
+| **Cache-friendly** | File contents never change, can cache aggressively |
+
+### How Updates/Deletes Work
+
+Since SSTables are immutable, updates and deletes create new entries:
+
+```
+SSTable_001: {key: "a", value: "old", seq: 1}
+SSTable_002: {key: "a", value: "new", seq: 5}  ← Higher seq wins
+
+# Delete = tombstone (value=None)
+SSTable_003: {key: "a", value: None, seq: 10}  ← Key is "deleted"
+```
+
+Old versions are cleaned up during **compaction**, which merges SSTables and drops shadowed entries.
+
+---
+
 ## Design Decisions
 
 ### Why footer at end?

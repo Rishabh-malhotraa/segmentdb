@@ -10,6 +10,9 @@ packages = [{include = "segmentdb", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.8"
 sortedcontainers = "^2.4.0"
+rbloom = "^1.5.4"
+xxhash = "^3.6.0"
+lz4 = "^4.3.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"

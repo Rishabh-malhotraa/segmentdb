@@ -1,6 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
-from threading import Condition, Lock, Thread
+from threading import Condition, Thread
 
 from sortedcontainers import SortedDict
 
