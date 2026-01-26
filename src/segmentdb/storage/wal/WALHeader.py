@@ -8,12 +8,14 @@ class WALHeader:
     """
     WAL file header (32 bytes total).
 
-    Binary format:
-    ┌─────────────┬──────┬───────────┬──────────┐
-    │ Magic       │ Ver  │ Timestamp │ Reserved │
-    │ 4 bytes     │ 4B   │ 8 bytes   │ 16 bytes │
-    │ 'WALX'      │ u32  │ u64       │ zeros    │
-    └─────────────┴──────┴───────────┴──────────┘
+    Binary format::
+
+        ┌─────────────┬──────┬───────────┬──────────┐
+        │ Magic       │ Ver  │ Timestamp │ Reserved │
+        │ 4 bytes     │ 4B   │ 8 bytes   │ 16 bytes │
+        │ 'WALX'      │ u32  │ u64       │ zeros    │
+        └─────────────┴──────┴───────────┴──────────┘
+
     Byte order: All integers use big-endian encoding (most significant byte first).
     """
 

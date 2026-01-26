@@ -15,18 +15,20 @@ class WALEntry:
     """
     WAL entry representing a single operation (PUT or DELETE).
 
-    Binary format (on disk):
-    ┌────────────┬─────────────────────────────────────────────────────────────┐
-    │ Length     │ Payload + Checksum                                          │
-    │ 4 bytes    │ (passed to from_bytes)                                      │
-    └────────────┴─────────────────────────────────────────────────────────────┘
+    Binary format (on disk)::
 
-    Payload + checksum format:
-    ┌──────┬──────────┬──────────┬─────────┬──────────┬─────────┬──────────┐
-    │ Seq# │ Op Type  │ Key Len  │ Val Len │ Key      │ Value   │ Checksum │
-    │ 8B   │ 1 byte   │ 2 bytes  │ 4 bytes │ variable │ var     │ 4 bytes  │
-    │ u64  │ u8       │ u16      │ u32     │ bytes    │ bytes   │ u32      │
-    └──────┴──────────┴──────────┴─────────┴──────────┴─────────┴──────────┘
+        ┌────────────┬─────────────────────────────────────────────────────────────┐
+        │ Length     │ Payload + Checksum                                          │
+        │ 4 bytes    │ (passed to from_bytes)                                      │
+        └────────────┴─────────────────────────────────────────────────────────────┘
+
+    Payload + checksum format::
+
+        ┌──────┬──────────┬──────────┬─────────┬──────────┬─────────┬──────────┐
+        │ Seq# │ Op Type  │ Key Len  │ Val Len │ Key      │ Value   │ Checksum │
+        │ 8B   │ 1 byte   │ 2 bytes  │ 4 bytes │ variable │ var     │ 4 bytes  │
+        │ u64  │ u8       │ u16      │ u32     │ bytes    │ bytes   │ u32      │
+        └──────┴──────────┴──────────┴─────────┴──────────┴─────────┴──────────┘
     """
 
     FIXED_HEADER_SIZE = 15  # seq_no(8) + op_type(1) + key_len(2) + val_len(4)

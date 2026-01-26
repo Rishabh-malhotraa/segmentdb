@@ -24,11 +24,12 @@ class SSTableHeader:
     """
     SSTable file header containing metadata for validation and recovery.
 
-    Format (17 bytes, big-endian):
-    ┌──────────────┬─────────┬───────┬─────────────┐
-    │ magic        │ version │ level │ entry_count │
-    │ (8 bytes)    │ (4 B)   │ (1 B) │ (4 bytes)   │
-    └──────────────┴─────────┴───────┴─────────────┘
+    Format (17 bytes, big-endian)::
+
+        ┌──────────────┬─────────┬───────┬─────────────┐
+        │ magic        │ version │ level │ entry_count │
+        │ (8 bytes)    │ (4 B)   │ (1 B) │ (4 bytes)   │
+        └──────────────┴─────────┴───────┴─────────────┘
 
     The level field enables manifest recovery by scanning SSTable files.
     """
@@ -60,11 +61,12 @@ class SSTableEntry:
     """
     A single key-value entry in the SSTable.
 
-    Entry format on disk (big-endian):
-    ┌────────────┬──────────┬─────────┬─────────┬───────────┬───────┬───────┐
-    │ length     │ seq_no   │ key_len │ val_len │ tombstone │ key   │ value │
-    │ (4 bytes)  │ (8 bytes)│ (2 B)   │ (4 B)   │ (1 byte)  │ (var) │ (var) │
-    └────────────┴──────────┴─────────┴─────────┴───────────┴───────┴───────┘
+    Entry format on disk (big-endian)::
+
+        ┌────────────┬──────────┬─────────┬─────────┬───────────┬───────┬───────┐
+        │ length     │ seq_no   │ key_len │ val_len │ tombstone │ key   │ value │
+        │ (4 bytes)  │ (8 bytes)│ (2 B)   │ (4 B)   │ (1 byte)  │ (var) │ (var) │
+        └────────────┴──────────┴─────────┴─────────┴───────────┴───────┴───────┘
 
     Tombstone flag: 0x00 = normal value, 0x01 = deleted (value is None)
     """
@@ -135,11 +137,12 @@ class Block:
     """
     A self-describing compressed block of SSTable entries.
 
-    Block format on disk:
-    ┌────────────────────┬────────────────────┬─────────────────────────────┬──────────┐
-    │ compressed_size    │ uncompressed_size  │ compressed_data             │ xxh32    │
-    │ (4 bytes, BE)      │ (4 bytes, BE)      │ (variable)                  │ (4 bytes)│
-    └────────────────────┴────────────────────┴─────────────────────────────┴──────────┘
+    Block format on disk::
+
+        ┌────────────────────┬────────────────────┬─────────────────────────────┬──────────┐
+        │ compressed_size    │ uncompressed_size  │ compressed_data             │ xxh32    │
+        │ (4 bytes, BE)      │ (4 bytes, BE)      │ (variable)                  │ (4 bytes)│
+        └────────────────────┴────────────────────┴─────────────────────────────┴──────────┘
 
     Benefits:
     - Self-describing: can read blocks without relying on index
@@ -267,11 +270,12 @@ class SparseIndexEntry:
     """
     Single entry in the sparse index mapping a block's first key to its offset.
 
-    Format on disk (big-endian):
-    ┌──────────┬──────────┬─────────────┐
-    │ offset   │ key_len  │ key         │
-    │ (8 bytes)│ (2 bytes)│ (variable)  │
-    └──────────┴──────────┴─────────────┘
+    Format on disk (big-endian)::
+
+        ┌──────────┬──────────┬─────────────┐
+        │ offset   │ key_len  │ key         │
+        │ (8 bytes)│ (2 bytes)│ (variable)  │
+        └──────────┴──────────┴─────────────┘
     """
 
     HEADER_SIZE: ClassVar[int] = 10  # offset(8) + key_len(2)
@@ -301,11 +305,12 @@ class SparseIndex:
     the first key of each block. This dramatically reduces index size
     while still enabling O(log n) block lookup via binary search.
 
-    Serialization format (big-endian):
-    ┌─────────────┬───────────────────────────────────┐
-    │ entry_count │ SparseIndexEntries                  │
-    │ (4 bytes)   │ (variable)                        │
-    └─────────────┴───────────────────────────────────┘
+    Serialization format (big-endian)::
+
+        ┌─────────────┬───────────────────────────────────┐
+        │ entry_count │ SparseIndexEntries                  │
+        │ (4 bytes)   │ (variable)                        │
+        └─────────────┴───────────────────────────────────┘
     """
 
     entries: list[SparseIndexEntry]
@@ -371,11 +376,12 @@ class SSTableFooter:
     sparse index and bloom filter without scanning the entire file.
     The trailing magic number validates file integrity and format.
 
-    Format (32 bytes, big-endian):
-    ┌─────────────┬────────────┬─────────────┬────────────┬─────────────┐
-    │index_offset │ index_size │bloom_offset │ bloom_size │ magic       │
-    │ (8 bytes)   │ (4 bytes)  │ (8 bytes)   │ (4 bytes)  │ (8 bytes)   │
-    └─────────────┴────────────┴─────────────┴────────────┴─────────────┘
+    Format (32 bytes, big-endian)::
+
+        ┌─────────────┬────────────┬─────────────┬────────────┬─────────────┐
+        │index_offset │ index_size │bloom_offset │ bloom_size │ magic       │
+        │ (8 bytes)   │ (4 bytes)  │ (8 bytes)   │ (4 bytes)  │ (8 bytes)   │
+        └─────────────┴────────────┴─────────────┴────────────┴─────────────┘
     """
 
     MAGIC_NUMBER: ClassVar[bytes] = b"SEGMTSST"
