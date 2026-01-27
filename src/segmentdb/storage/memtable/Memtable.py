@@ -48,7 +48,7 @@ class Memtable:
         MAX_SIZE_BYTES: Threshold (4MB) at which memtable is rotated to immutable.
     """
 
-    MAX_SIZE_BYTES = 4 * 1024 * 1024  # 4MB
+    MAX_SIZE_BYTES = 100 * 1024 * 1024  # 100MB
 
     def __init__(self):
         self._store = SortedDict()

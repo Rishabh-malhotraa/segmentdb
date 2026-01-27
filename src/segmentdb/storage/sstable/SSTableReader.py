@@ -1,6 +1,8 @@
 from typing import BinaryIO
+import struct
+import xxhash
 
-from .models import SSTableFooter, SparseIndex
+from .models import SSTableFooter, SparseIndex, Block
 from .BloomFilter import BloomFilter
 import os
 
@@ -10,12 +12,14 @@ class SSTableReader:
     Reads an SSTable file, keeping bloom filter and index in RAM.
 
     The file descriptor stays open for the lifetime of the reader
-    to avoid repeated open/close on each lookup.
+    to avoid repeated open/close on each lookup. Designed to be pooled
+    and kept warm for efficient repeated access.
 
     Usage:
-        with SSTableReader(path) as reader:
-            if reader.bloom.might_contain(key):
-                value = reader.get(key)
+        reader = SSTableReader(path)
+        value = reader.get(key)  # Bloom filter checked internally
+        # ... keep reader open for more lookups ...
+        reader.close()  # When shutting down
     """
 
     def __init__(self, filename: str):
@@ -28,10 +32,45 @@ class SSTableReader:
             self.fd.close()
             raise
 
+    def __contains__(self, key: bytes) -> bool:
+        """Check if key exists in this SSTable."""
+        return self.get(key) is not None
+
     def get(self, key: bytes) -> bytes | None:
-        if key in self.bloom:
-            offset = self.index.find_block_offset(key)
-        pass
+        if key not in self.bloom:
+            return None
+
+        offset = self.index.find_block_offset(key)
+        if offset is None:
+            return None
+
+        self.fd.seek(offset)
+
+        header = self._read_exact(self.fd, 8, "block header")
+        compressed_size, uncompressed_size = struct.unpack(">II", header)
+
+        compressed_data = self._read_exact(self.fd, compressed_size, "compressed data")
+        stored_checksum = struct.unpack(">I", self._read_exact(self.fd, 4, "checksum"))[
+            0
+        ]
+
+        computed_checksum = xxhash.xxh32(header + compressed_data).intdigest()
+        if stored_checksum != computed_checksum:
+            raise ValueError(
+                f"Block checksum mismatch: stored={stored_checksum:#x}, "
+                f"computed={computed_checksum:#x}"
+            )
+
+        # Create block and iterate entries
+        block = Block(data=compressed_data, uncompressed_size=uncompressed_size)
+
+        for entry in block:
+            if entry.key == key:
+                return entry.value
+            if entry.key > key:
+                break
+
+        return None
 
     def _load_metadata(self):
         """Load footer, bloom filter, and sparse index into RAM."""
@@ -58,7 +97,8 @@ class SSTableReader:
         if self.fd:
             self.fd.close()
 
-    def _read_exact(self, f: BinaryIO, n: int, context: str = "") -> bytes:
+    @staticmethod
+    def _read_exact(f: BinaryIO, n: int, context: str = "") -> bytes:
         """
         Read exactly n bytes from file, raising if not enough data.
 

@@ -158,6 +158,26 @@ class Block:
     data: bytes
     uncompressed_size: int
 
+    def __iter__(self):
+        """
+        Iterate over SSTableEntry objects in the block.
+
+        Like range(), this can be iterated multiple times - each iteration
+        decompresses and yields entries fresh.
+
+        Yields:
+            SSTableEntry objects in sorted key order.
+        """
+        data = self.decompress()
+        pos = 0
+        while pos < len(data):
+            entry_length = struct.unpack(
+                ">I", data[pos : pos + SSTableEntry.LENGTH_PREFIX_SIZE]
+            )[0]
+            entry_size = SSTableEntry.LENGTH_PREFIX_SIZE + entry_length
+            yield SSTableEntry.from_bytes(data[pos : pos + entry_size])
+            pos += entry_size
+
     @property
     def size(self) -> int:
         """Total size on disk including header and footer."""
@@ -186,47 +206,6 @@ class Block:
         )
 
         return cls(data=compressed, uncompressed_size=len(raw_data))
-
-    def decompress(self) -> bytes:
-        """
-        Decompress and return the raw block data.
-
-        Returns:
-            Concatenated serialized SSTableEntry bytes that can be
-            parsed sequentially to reconstruct individual entries.
-        """
-        return lz4.block.decompress(self.data, uncompressed_size=self.uncompressed_size)
-
-    def iter_entries(self):
-        """
-        Decompress block and yield SSTableEntry objects.
-
-        Yields:
-            SSTableEntry objects in sorted key order.
-        """
-        data = self.decompress()
-        pos = 0
-        while pos < len(data):
-            # Read entry length prefix to know how much to consume
-            entry_length = struct.unpack(
-                ">I", data[pos : pos + SSTableEntry.LENGTH_PREFIX_SIZE]
-            )[0]
-            entry_size = SSTableEntry.LENGTH_PREFIX_SIZE + entry_length
-            entry = SSTableEntry.from_bytes(data[pos : pos + entry_size])
-            yield entry
-            pos += entry_size
-
-    def to_bytes(self) -> bytes:
-        """
-        Serialize block to bytes for writing to disk.
-
-        Returns:
-            Complete block bytes: header + compressed_data + xxh32
-        """
-        header = struct.pack(">II", len(self.data), self.uncompressed_size)
-        checksum = xxhash.xxh32(header + self.data).intdigest()
-        footer = struct.pack(">I", checksum)
-        return header + self.data + footer
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Block":
@@ -263,6 +242,28 @@ class Block:
             )
 
         return cls(data=compressed_data, uncompressed_size=uncompressed_size)
+
+    def to_bytes(self) -> bytes:
+        """
+        Serialize block to bytes for writing to disk.
+
+        Returns:
+            Complete block bytes: header + compressed_data + xxh32
+        """
+        header = struct.pack(">II", len(self.data), self.uncompressed_size)
+        checksum = xxhash.xxh32(header + self.data).intdigest()
+        footer = struct.pack(">I", checksum)
+        return header + self.data + footer
+
+    def decompress(self) -> bytes:
+        """
+        Decompress and return the raw block data.
+
+        Returns:
+            Concatenated serialized SSTableEntry bytes that can be
+            parsed sequentially to reconstruct individual entries.
+        """
+        return lz4.block.decompress(self.data, uncompressed_size=self.uncompressed_size)
 
 
 @dataclass(slots=True)
