@@ -112,7 +112,9 @@ class Memtable:
         while True:
             with self._flush_signal:
                 self._flush_signal.wait_for(lambda: self._immutable_stores)
-                task = self._immutable_stores.popleft()
+                # Peek, but leave the task in the deque so that get() can still
+                # find its keys while the (slow, unlocked) flush is in progress.
+                task = self._immutable_stores[0]
 
             if task is None:
                 return
@@ -126,3 +128,9 @@ class Memtable:
 
             # TODO: After successful flush, checkpoint the WAL at task.checkpoint_seq_no
             # This allows truncating WAL entries up to this sequence number
+
+            # Only now that the data is durable on disk do we remove the task
+            # from the deque. Until this point the keys remain visible to get()
+            # via the deque, so a written key is always findable somewhere.
+            with self._flush_signal:
+                self._immutable_stores.popleft()
