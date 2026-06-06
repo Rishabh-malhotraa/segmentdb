@@ -1,4 +1,4 @@
-from .Memtable import Memtable, MemtableEntry
+from .Memtable import FlushTask, Memtable, MemtableEntry
 
-__all__ = ["Memtable", "MemtableEntry"]
+__all__ = ["FlushTask", "Memtable", "MemtableEntry"]
 

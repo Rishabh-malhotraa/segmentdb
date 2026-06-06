@@ -1,4 +1,5 @@
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Condition, Thread
 
@@ -50,7 +51,8 @@ class Memtable:
 
     MAX_SIZE_BYTES = 100 * 1024 * 1024  # 100MB
 
-    def __init__(self):
+    def __init__(self, on_flush: Callable[[FlushTask], None]):
+        self._on_flush = on_flush
         self._store = SortedDict()
         self._size_bytes = 0
         self._immutable_stores: deque[FlushTask | None] = deque()
@@ -119,15 +121,7 @@ class Memtable:
             if task is None:
                 return
 
-            # Iterate through all entries in sorted order
-            for key, entry in task.store.items():
-                # TODO: Write to SSTable
-                # TODO: Add key to bloom filter
-                # TODO: Update sparse index
-                pass
-
-            # TODO: After successful flush, checkpoint the WAL at task.checkpoint_seq_no
-            # This allows truncating WAL entries up to this sequence number
+            self._on_flush(task)
 
             # Only now that the data is durable on disk do we remove the task
             # from the deque. Until this point the keys remain visible to get()

@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from sortedcontainers import SortedDict
 
@@ -11,17 +12,19 @@ from .models import (
     SSTableFooter,
 )
 from .BloomFilter import BloomFilter
+from segmentdb.storage.manifest import SSTableMeta
 
 
 class SSTableWriter:
     BLOCK_SIZE = 4 * 1024  # 4KB
     VERSION = 1
 
-    def __init__(self, store: SortedDict, level: int = 0):
+    def __init__(self, sst_id: int, store: SortedDict, level: int = 0):
+        self.sst_id = sst_id
         self.store = store
         self.level = level
 
-    def write(self, path: Path) -> None:
+    def write(self, path: Path) -> SSTableMeta:
         """
         Write the entire SSTable to disk atomically.
 
@@ -82,6 +85,22 @@ class SSTableWriter:
             os.fsync(f.fileno())
 
         temp_path.rename(path)
+
+        # Build metadata from what we just wrote
+        keys = self.store.keys()
+        seq_nos = [entry.seq_no for entry in self.store.values()]
+        return SSTableMeta(
+            id=self.sst_id,
+            filename=path.name,
+            level=self.level,
+            min_key=keys[0],
+            max_key=keys[-1],
+            min_seq_no=min(seq_nos),
+            max_seq_no=max(seq_nos),
+            entry_count=entry_count,
+            file_size=path.stat().st_size,
+            created_at=int(time.time()),
+        )
 
     def _build_blocks_and_index(
         self,

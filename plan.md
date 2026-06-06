@@ -2,23 +2,23 @@ Can you plan this project for me, like what do i need to implement and it what o
 
 Workspace: Collecting workspace informationHere’s a concise implementation plan, in order:
 
-## Progress Status (Updated: June 3, 2026)
+## Progress Status (Updated: June 6, 2026)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | WAL layer | ✅ Done | WALEntry, WALHeader, WALReader, WALWriter with xxh32 checksums |
 | Memtable | ✅ Done | SortedDict-based, flush trigger, tombstone support, peek-then-pop visibility fix |
 | Bloom Filter | ✅ Done | rbloom + xxh3_64 for deterministic hashing |
-| SSTable Writer | ✅ Done | LZ4 compression, block checksums, atomic writes |
+| SSTable Writer | ✅ Done | LZ4 compression, block checksums, atomic writes, returns SSTableMeta |
 | SSTable Models | ✅ Done | Header, Entry (with tombstone), Block (iterable), SparseIndex, Footer |
 | SSTable Reader | ✅ Done | Opens file, loads bloom/index, get() with lazy block iteration |
 | Manifest | ✅ Done | SSTableMeta + Manifest with atomic JSON save, candidates_for_key (L0 scan + L1+ binary search), tests |
-| Wire Memtable Flush | ⬜ Next Up | Connect _flush_worker to SSTableWriter + Manifest |
+| Wire Memtable Flush | ✅ Done | Callback wiring: Memtable → SSTableWriter → Manifest. See docs/memtable-flush-wiring.md |
 | Compaction | ⬜ Not Started | Folder structure created |
-| Full DB API | ⬜ Not Started | |
+| Full DB API | ⬜ Next Up | WAL → memtable → SSTable lookup chain, tombstone-aware get |
 | Recovery | ⬜ Not Started | |
 
-**Estimated Progress: ~60%**
+**Estimated Progress: ~70%**
 
 ---
 
@@ -113,7 +113,7 @@ Missing pieces to add:
 ## Next Steps
 
 1. ~~**Implement Manifest**~~ ✅ — SSTableMeta + Manifest with atomic JSON save, L0 scan + L1+ binary search, tests
-2. **Wire Memtable flush** — Connect `Memtable._flush_worker()` to SSTableWriter + Manifest (allocate_id → write SSTable → add_sstable → save → popleft → checkpoint WAL)
+2. ~~**Wire Memtable flush**~~ ✅ — Callback wiring: Memtable → SSTableWriter (returns SSTableMeta) → Manifest. Required on_flush callback, no silent no-ops. See docs/memtable-flush-wiring.md
 3. **Full DB class** — Unified API: WAL → memtable → SSTable lookup chain, tombstone-aware get
 4. **Recovery** — Load manifest, replay WAL entries > last_seq_no, rebuild state
 5. **Implement Compaction** — Start with leveled, k-way merge, atomic manifest swap
